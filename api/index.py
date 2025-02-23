@@ -12,8 +12,8 @@ app.json.sort_keys = False
 CORS(app)
 
 # Base webhook URL for notifications (fixed as specified)
-BASE_WEBHOOK_URL = "https://telex.app.im/v1/webhooks"
-
+BASE_WEBHOOK_URL = os.getenv("BASE_WEBHOOK_URL")
+target_url = os.getenv("target_url")
 # Read the webhook slug from the environment variables
 WEBHOOK_SLUG = os.getenv("WEBHOOK_SLUG")
 
@@ -109,7 +109,7 @@ def integration_json():
                     "default": "dd/mm/yy"
                 },
             ],
-            "target_url": "https://hng-telex-stage3.vercel.app/target_url",
+            "target_url": target_url,
         }
     }
 
