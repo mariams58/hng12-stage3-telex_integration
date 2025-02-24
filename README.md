@@ -70,9 +70,14 @@ Create a `.env` file in the project root directory with the following content (u
 
 ## Testing
 
-## Dwployment
+## Deployment
 
 ## Usage
+1. Install the integration using its JSON URL at:[Integration.json](https://hng-telex-stage3.vercel.app/integration.json)
+
+2. Set the Subscription Expiration Notifier in the settings (Org dashboard > Apps > "Subscription Expiration Notifier" > Settings), obtained from [the interation hosted url](https://hng-telex-stage3.vercel.app)
+
+3. Ensure the integration is activated at the organisation and the individual channels you want to use it
 
 ## License
     This project is licensed under the MIT License
