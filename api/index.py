@@ -3,6 +3,9 @@ from flask_cors import CORS
 import requests, os, time, threading
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import logging, smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # Load environment variables from .env file
 load_dotenv()
@@ -14,14 +17,17 @@ CORS(app)
 # Base webhook URL for notifications (fixed as specified)
 BASE_WEBHOOK_URL = os.getenv("BASE_WEBHOOK_URL")
 target_url = os.getenv("target_url")
+smtp_host = os.getenv("smtp_host")
+smtp_username = os.getenv("smtp_username")
+smtp_password = os.getenv("smtp_password")
+smtp_port = 587
 # Read the webhook slug from the environment variables
 WEBHOOK_SLUG = os.getenv("WEBHOOK_SLUG")
 
-def notify_daily(subscription: str, expiry_date: datetime.date, webhook_slug: str):
+def notify_daily(subscription: str, expiry_date: datetime.date, email: str):
     """
     Sends a daily notification from 7 days before the subscription expires until expiration.
-    Each notification is sent to channel
-    with a payload in the expected JSON format.
+    Each notification is sent to email provided in the settings
     """
     now = datetime.now().date()
     # Determine the start date for notifications (7 days before expiry)
@@ -32,22 +38,27 @@ def notify_daily(subscription: str, expiry_date: datetime.date, webhook_slug: st
     # Total number of notifications (including the expiration day)
     days_to_notify = (expiry_date - start_date).days + 1
 
+    # Create the email message
+    email_content = (
+        f"Hello,\n\nYour subscription for {subscription} expires in {i+1}.\n"
+        f"Additional details: \n\nPlease take the necessary actions to renew."
+    )
+    msg = MIMEMultipart()
+    msg['From'] = smtp_username
+    msg['To'] = email
+    msg['Subject'] = "Subscription Expiration Notice"
+    msg.attach(MIMEText(email_content, 'plain'))
+
     for i in range(days_to_notify):
-        url = f"{BASE_WEBHOOK_URL}/{webhook_slug}"
-        payload = {
-            "event_name": "subscription_expiry_notification",
-            "message": f"Your subscription for {subscription} expires on {expiry_date.strftime('%d/%m/%Y')}. Notification #{i+1}",
-            "status": "success"
-        }
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
         try:
-            response = requests.post(url, json=payload, headers=headers)
-            print(f"Notification {i+1} sent with status: {response.status_code}")
+            server = smtplib.SMTP(smtp_host, smtp_port)
+            server.starttls()
+            server.login(smtp_username, smtp_password)
+            server.sendmail(msg['From'], msg['To'], msg.as_string())
+            server.quit()
+            logging.info(f"Email sent successfully to {email}")
         except Exception as e:
-            print(f"Error sending notification: {e}")
+            logging.error(f"Failed to send email to {email}: {e}")
         # Wait 24 hours before sending the next notification
         time.sleep(86400)
 
@@ -63,7 +74,7 @@ def integration_json():
             "descriptions": {
                 "app_name": "Subscription Expiration Notifier",
                 "app_description": "Notifies users when their subscription is close to expiration.",
-                "app_logo": "https://imgur.com/g8KHynf",
+                "app_logo": "https://i.imgur.com/g8KHynf.png",
                 "app_url": base_url,
                 "background_color": "#FFFFFF"
             },
@@ -90,10 +101,10 @@ def integration_json():
             "author": "Mariam Smith",
             "settings": [
                 {
-                    "label": "subscription_slug",
+                    "label": "email",
                     "type": "text",
                     "required": True,
-                    "default": "* * * * *"
+                    "default": ""
                 },
                 {
                     "label": "Subscriptions",
@@ -123,28 +134,32 @@ def target_point():
     if not data:
         return make_response(jsonify({"error": "No JSON payload provided"}), 400)
     
-    settings = data.get("settings")
-    webhook_slug = data.get("subscription_slug", "* * * * *")
+    settings = data.get("settings", [])
     
-    if not settings:
-        return make_response(jsonify({"error": "No settings provided"}), 400)
+    # Extract the 'email' setting from the settings list
+    email_setting = next((s for s in settings if s.get('label') == 'email'), None)
+    email = email_setting.get('default') if email_setting else None
+    if not email:
+        return make_response(jsonify({'error': 'email setting is required'}), 400)
+
+    subscription_setting = next((s for s in settings if s.get('label') == 'Subscriptions'), None)
+    expiry_setting = next((s for s in settings if s.get('label') == 'expiry_date'), None)
+    subscription = subscription_setting.get('default') if subscription_setting else "Unknown"
+    expiry_date = expiry_setting.get('default') if expiry_setting else "Unknown"
     
-    subscription_type = settings.get("Subscriptions", "Netflix")
-    expiry_date_str = settings.get("expiry_date")
-    
-    if not expiry_date_str:
+    if not expiry_date:
         return make_response(jsonify({"error": "expiry_date is required"}), 400)
     
     # Parse expiry_date from dd/mm/yy format
     try:
-        expiry_date = datetime.strptime(expiry_date_str, "%d/%m/%y").date()
+        expiry_date = datetime.strptime(expiry_date, "%d/%m/%y").date()
     except Exception as e:
         return make_response(jsonify({
             "error": f"Invalid expiry_date format. Expected dd/mm/yy. {str(e)}"
         }), 400)
     
     # Launch background thread to handle daily notifications
-    thread = threading.Thread(target=notify_daily, args=(subscription_type, expiry_date, webhook_slug))
+    thread = threading.Thread(target=notify_daily, args=(subscription, expiry_date, email))
     thread.start()
     return make_response("", 202)
 
