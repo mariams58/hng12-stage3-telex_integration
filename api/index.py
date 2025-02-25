@@ -24,24 +24,16 @@ smtp_port = 587
 # Read the webhook slug from the environment variables
 WEBHOOK_SLUG = os.getenv("WEBHOOK_SLUG")
 
-def notify_daily(subscription: str, expiry_date: datetime.date, email: str):
+def notify_daily(subscription: str, expiry_date: datetime.date, email: str, message: str):
     """
-    Sends a daily notification from 7 days before the subscription expires until expiration.
+    Sends notification of subscription expires expiration.
     Each notification is sent to email provided in the settings
     """
-    now = datetime.now().date()
-    # Determine the start date for notifications (7 days before expiry)
-    start_date = expiry_date - timedelta(days=7)
-    if now > start_date:
-        start_date = now
-
-    # Total number of notifications (including the expiration day)
-    days_to_notify = (expiry_date - start_date).days + 1
-
+    days = expiry_date.days
     # Create the email message
     email_content = (
-        f"Hello,\n\nYour subscription for {subscription} expires in {i+1}.\n"
-        f"Additional details: \n\nPlease take the necessary actions to renew."
+        f"Hello,\n\nYour subscription for {subscription} expires in {days+1}.\n"
+        f"Additional details: {message}\n\nPlease take the necessary actions to renew."
     )
     msg = MIMEMultipart()
     msg['From'] = smtp_username
@@ -49,18 +41,16 @@ def notify_daily(subscription: str, expiry_date: datetime.date, email: str):
     msg['Subject'] = "Subscription Expiration Notice"
     msg.attach(MIMEText(email_content, 'plain'))
 
-    for i in range(days_to_notify):
-        try:
-            server = smtplib.SMTP(smtp_host, smtp_port)
-            server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.sendmail(msg['From'], msg['To'], msg.as_string())
-            server.quit()
-            logging.info(f"Email sent successfully to {email}")
-        except Exception as e:
-            logging.error(f"Failed to send email to {email}: {e}")
-        # Wait 24 hours before sending the next notification
-        time.sleep(86400)
+    try:
+        server = smtplib.SMTP(smtp_host, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.sendmail(msg['From'], msg['To'], msg.as_string())
+        server.quit()
+        logging.info(f"Email sent successfully to {email}")
+    except Exception as e:
+        logging.error(f"Failed to send email to {email}: {e}")
+
 
 @app.route("/integration.json", methods=['GET'])
 def integration_json():
@@ -135,6 +125,7 @@ def target_point():
         return make_response(jsonify({"error": "No JSON payload provided"}), 400)
     
     settings = data.get("settings", [])
+    message = data.get('message')
     
     # Extract the 'email' setting from the settings list
     email_setting = next((s for s in settings if s.get('label') == 'email'), None)
@@ -159,11 +150,14 @@ def target_point():
         }), 400)
     
     # Launch background thread to handle daily notifications
-    thread = threading.Thread(target=notify_daily, args=(subscription, expiry_date, email))
-    thread.start()
-    return make_response("", 202)
+    #thread = threading.Thread(target=notify_daily, args=(subscription, expiry_date, email))
+    #thread.start()
+    response = make_response("", 202)
+    response.call_on_close(lambda: notify_daily(subscription, expiry_date, email, message))
+    return response
 
-@app.route('/status', methods=['GET'])
+
+@app.route('/', methods=['GET'])
 def status():
     """
     Public endponit to check status of the integration
